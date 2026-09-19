@@ -1,0 +1,6 @@
+{
+  "name": "Barney's 3D Monopoly",
+  "description": "Interactive 3D Monopoly engine with Barney's Custom Rules, Card Compendium for Property Deeds, Wildcards, Chance, and Community Chest cards, Exchange Center, In-Game Settings, and smooth 3D camera animations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
