@@ -3,12 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "predev": "rm -rf .next",
     "dev": "next dev",
-    "build": "NODE_ENV=production next build",
+    "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "clean": "rm -rf .next"
+    "clean": "node -e \"fs.rmSync('.next', { recursive: true, force: true })\""
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

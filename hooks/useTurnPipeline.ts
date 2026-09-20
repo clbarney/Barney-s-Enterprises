@@ -135,6 +135,203 @@ export function useTurnPipeline<T extends EngineStateLike>({
     [gameState.lastDiceRoll, gameState.lotteryPool, activePlayer, addLog, setEngineState]
   );
 
+  // --- SPACE RESOLUTION LOGIC FOR LANDINGS (Rolls, Rail Transit, Warp) ---
+  const resolveLandedSpace = useCallback(
+    (targetPos: number, currentDiceTotal: number = 7) => {
+      const landedSpace = boardSpaces[targetPos];
+      if (!landedSpace) return;
+
+      if (landedSpace.type === 'FREE_PARKING') {
+        handleFreeParkingLanding(false);
+        const satRatePlayers = players.filter(
+          (p) => p.id !== activePlayer.id && p.activeModifiers.some((m) => m.id === 'saturday_rates')
+        );
+        if (satRatePlayers.length > 0) {
+          soundFx.playCash();
+          setEngineState((prev) => ({
+            ...prev,
+            players: prev.players.map((p) =>
+              satRatePlayers.some((s) => s.id === p.id) ? { ...p, cash: p.cash + 100 } : p
+            ),
+          }));
+          satRatePlayers.forEach((s) => {
+            addLog(`🏖️ Saturday Rates: ${s.name} collected $100 from Free Parking visit!`, 'success', s.id);
+          });
+        }
+      } else if (landedSpace.type === 'CHANCE') {
+        onDrawChance();
+        addLog(`❓ ${activePlayer.name} landed on Chance! Drawing Chance card...`, 'card', activePlayer.id);
+      } else if (landedSpace.type === 'COMMUNITY_CHEST') {
+        onDrawCommunityChest();
+        addLog(`🧰 ${activePlayer.name} landed on Community Chest! Drawing card...`, 'card', activePlayer.id);
+      } else if (landedSpace.type === 'GO_TO_JAIL') {
+        soundFx.playJail();
+        setEngineState((prev) => ({
+          ...prev,
+          players: prev.players.map((p) =>
+            p.id === activePlayer.id ? { ...p, position: 10, inJail: true, jailTurns: 0 } : p
+          ),
+        }));
+        addLog(`🚨 ${activePlayer.name} sent to Jail!`, 'danger', activePlayer.id);
+      } else if (landedSpace.type === 'TAX' && landedSpace.taxAmount) {
+        const isTaxImmune =
+          activePlayer.taxExempt ||
+          activePlayer.activeModifiers.some(
+            (m) => m.id === 'tax_exempt' || m.id === 'obstructing_injustice'
+          );
+        if (isTaxImmune) {
+          soundFx.playCash();
+          addLog(`🏛️ ${activePlayer.name} invoked Tax Exemption! Paid $0 tax to Vault.`, 'success', activePlayer.id);
+        } else {
+          const taxFee = landedSpace.taxAmount;
+          setEngineState((prev) => ({
+            ...prev,
+            players: prev.players.map((p) =>
+              p.id === activePlayer.id ? { ...p, cash: Math.max(0, p.cash - taxFee) } : p
+            ),
+            gameState: {
+              ...prev.gameState,
+              lotteryPool: Math.min(2000, prev.gameState.lotteryPool + taxFee),
+              hasTaxOccurred: true,
+            },
+          }));
+          addLog(`💸 ${activePlayer.name} paid $${taxFee} tax to Vault. Monopoly Duel card unlocked!`, 'warning', activePlayer.id);
+        }
+      } else if (landedSpace.type === 'PROPERTY' && landedSpace.propertyId) {
+        const prop = properties.find((p) => p.id === landedSpace.propertyId);
+        if (prop) {
+          if (prop.ownerId === null) {
+            if (!activePlayer.isAi) {
+              addLog(`🏢 Landed on unowned ${prop.name}. Decision required ($${prop.basePrice}).`, 'info', activePlayer.id);
+            }
+          } else if (prop.ownerId !== activePlayer.id) {
+            const owner = players.find((p) => p.id === prop.ownerId) || null;
+            const currentConcessions = gameState.rentConcessions || [];
+            const activeConcessionIdx = currentConcessions.findIndex(
+              (rc: any) =>
+                rc.propertyId === prop.id &&
+                rc.beneficiaryId === activePlayer.id &&
+                rc.grantorId === prop.ownerId &&
+                rc.remainingLandings > 0
+            );
+
+            const hasImmunity = activePlayer.activeModifiers.some((m) => m.id === 'obstructing_injustice');
+            const hasFreeRent = activePlayer.activeModifiers.some((m) => m.id === 'free_rent');
+            const hasRentEvasion = activePlayer.activeModifiers.some((m) => m.id === 'rent_evasion');
+            const isVip = activePlayer.activeModifiers.some((m) => m.id === 'vip');
+
+            const wasCrooked = prop.isCrooked || prop.modifiedBy?.includes('crooked');
+
+            if (hasImmunity) {
+              soundFx.playCash();
+              addLog(`⚖️ Total Immunity Shield! ${activePlayer.name} paid $0 rent to ${owner?.name} for ${prop.name}!`, 'success', activePlayer.id);
+            } else if (hasFreeRent) {
+              const rent = calculateRent(prop, properties, owner, currentDiceTotal, isVip);
+              soundFx.playCash();
+              setEngineState((prev) => ({
+                ...prev,
+                players: prev.players.map((p) => {
+                  if (p.id === prop.ownerId) return { ...p, cash: p.cash + rent };
+                  if (p.id === activePlayer.id) {
+                    return {
+                      ...p,
+                      activeModifiers: p.activeModifiers.filter((m) => m.id !== 'free_rent'),
+                    };
+                  }
+                  return p;
+                }),
+                properties: wasCrooked
+                  ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                  : prev.properties,
+              }));
+              addLog(`🛡️ Free Rent Shield activated! ${activePlayer.name} paid $0; Bank covered $${rent} rent to ${owner?.name}!`, 'success', activePlayer.id);
+            } else if (hasRentEvasion) {
+              const rent = calculateRent(prop, properties, owner, currentDiceTotal, isVip);
+              soundFx.playCash();
+              setEngineState((prev) => ({
+                ...prev,
+                players: prev.players.map((p) => {
+                  if (p.id === activePlayer.id) {
+                    return {
+                      ...p,
+                      cash: p.cash + rent,
+                      activeModifiers: p.activeModifiers.filter((m) => m.id !== 'rent_evasion'),
+                    };
+                  }
+                  if (p.id === prop.ownerId) return { ...p, cash: Math.max(0, p.cash - rent) };
+                  return p;
+                }),
+                properties: wasCrooked
+                  ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                  : prev.properties,
+              }));
+              addLog(`🔄 Rent Evasion! Owner ${owner?.name} paid YOU $${rent} rent instead for ${prop.name}!`, 'success', activePlayer.id);
+            } else if (activeConcessionIdx !== -1) {
+              const conc = currentConcessions[activeConcessionIdx];
+              const remaining = conc.remainingLandings - 1;
+              const updatedConcessions = currentConcessions
+                .map((rc: any, i: number) => (i === activeConcessionIdx ? { ...rc, remainingLandings: remaining } : rc))
+                .filter((rc: any) => rc.remainingLandings > 0);
+
+              soundFx.playCash();
+              setEngineState((prev) => ({
+                ...prev,
+                gameState: {
+                  ...prev.gameState,
+                  rentConcessions: updatedConcessions,
+                },
+              }));
+              addLog(
+                `🛡️ RENT IMMUNITY ACTIVATED! ${activePlayer.name} landed on ${owner?.name}'s ${prop.name} for $0 under trade concession (${remaining} free landings remaining).`,
+                'success',
+                activePlayer.id
+              );
+            } else {
+              const rent = calculateRent(prop, properties, owner, currentDiceTotal, isVip);
+              if (rent > 0) {
+                const wasCrooked = prop.isCrooked || prop.modifiedBy?.includes('crooked');
+                soundFx.playCash();
+                setEngineState((prev) => ({
+                  ...prev,
+                  players: prev.players.map((p) => {
+                    if (p.id === activePlayer.id) {
+                      const updatedMods = isVip
+                        ? p.activeModifiers.filter((m) => m.id !== 'vip')
+                        : p.activeModifiers;
+                      return { ...p, cash: Math.max(0, p.cash - rent), activeModifiers: updatedMods };
+                    }
+                    if (p.id === prop.ownerId) return { ...p, cash: p.cash + rent };
+                    return p;
+                  }),
+                  properties: wasCrooked
+                    ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                    : prev.properties,
+                }));
+                addLog(
+                  `🏠 ${activePlayer.name} paid $${rent} rent to ${owner?.name} for ${prop.name}${wasCrooked ? ' (2x Crooked Rigged Rent!)' : ''}.`,
+                  'warning',
+                  activePlayer.id
+                );
+              }
+            }
+          }
+        }
+      }
+    },
+    [
+      activePlayer,
+      boardSpaces,
+      properties,
+      players,
+      gameState.rentConcessions,
+      addLog,
+      setEngineState,
+      handleFreeParkingLanding,
+      onDrawChance,
+      onDrawCommunityChest,
+    ]
+  );
+
   // --- RAILWAY TRANSPORTATION HANDLER ---
   const handleExecuteRailTransit = useCallback(
     (targetSpaceIndex: number, cost: number, stationName: string) => {
@@ -158,14 +355,19 @@ export function useTurnPipeline<T extends EngineStateLike>({
               }
             : p
         ),
+        gameState: {
+          ...prev.gameState,
+          turnPhase: 'RESOLVING_SPACE',
+        },
       }));
       addLog(
         `🚂 Railway Transportation: ${activePlayer.name} rode the train to ${stationName} (${cost === 0 ? 'FREE Multi-Owner Pass' : '$' + cost})!`,
         'rule',
         activePlayer.id
       );
+      resolveLandedSpace(targetSpaceIndex, 7);
     },
-    [activePlayer, addLog, setEngineState]
+    [activePlayer, addLog, setEngineState, resolveLandedSpace]
   );
 
   // --- LAND ON GO OPTIONS ---
@@ -190,10 +392,15 @@ export function useTurnPipeline<T extends EngineStateLike>({
         players: prev.players.map((p) =>
           p.id === activePlayer.id ? { ...p, position: targetSpaceIndex } : p
         ),
+        gameState: {
+          ...prev.gameState,
+          turnPhase: 'RESOLVING_SPACE',
+        },
       }));
       addLog(`✨ Land on GO Privilege: ${activePlayer.name} tactically warped to ${spaceName}!`, 'rule', activePlayer.id);
+      resolveLandedSpace(targetSpaceIndex, 7);
     },
-    [activePlayer, addLog, setEngineState]
+    [activePlayer, addLog, setEngineState, resolveLandedSpace]
   );
 
   // --- TURN PIPELINE: TRIGGER 3D PHYSICAL DICE ROLL ---
@@ -231,6 +438,11 @@ export function useTurnPipeline<T extends EngineStateLike>({
 
       let newCash = activePlayer.cash;
       let releasedFromJail = false;
+      let usedJailCard = false;
+
+      let remainingModifiers = activePlayer.activeModifiers.filter(
+        (m) => m.id !== 'extra_die' && m.id !== 'one_die'
+      );
 
       if (activePlayer.activeModifiers.some((m) => m.id === 'power_trip')) {
         const powerBonus = totalRoll * 10;
@@ -242,6 +454,7 @@ export function useTurnPipeline<T extends EngineStateLike>({
         if (activePlayer.hasGetOutOfJailFreeCard) {
           soundFx.playFanfare();
           releasedFromJail = true;
+          usedJailCard = true;
           addLog(
             `🎉 ${activePlayer.name} used their Get Out of Jail Free card and was released from Jail!`,
             'success',
@@ -268,34 +481,65 @@ export function useTurnPipeline<T extends EngineStateLike>({
         } else {
           const nextJailTurn = activePlayer.jailTurns + 1;
           setEngineState((prev) => {
-            let nextPlayerId = (prev.gameState.activeTurnPlayerId + 1) % prev.players.length;
-            let attempts = 0;
-            while (prev.players[nextPlayerId].isBankrupt && attempts < prev.players.length) {
-              nextPlayerId = (nextPlayerId + 1) % prev.players.length;
-              attempts++;
-            }
+            const isDoublesRoll = d1 === d2;
             return {
               ...prev,
               players: prev.players.map((p) =>
-                p.id === activePlayer.id ? { ...p, jailTurns: nextJailTurn } : p
+                p.id === activePlayer.id
+                  ? {
+                      ...p,
+                      jailTurns: nextJailTurn,
+                      activeModifiers: remainingModifiers,
+                    }
+                  : p
               ),
               gameState: {
                 ...prev.gameState,
-                activeTurnPlayerId: nextPlayerId,
-                turnPhase: 'PRE_ROLL',
                 lastDiceRoll: [d1, d2],
-                isSnakeEyes: false,
-                consecutiveDoubles: 0,
+                turnPhase: 'POST_ROLL',
               },
             };
           });
           addLog(
-            `⛓️ ${activePlayer.name} rolled ${d1}+${d2} (no doubles) and remains in Jail (Attempt ${nextJailTurn}/3). Turn ends.`,
+            `🔒 ${activePlayer.name} failed to roll doubles (${d1}, ${d2}). Attempt ${nextJailTurn}/3 in Jail.`,
             'warning',
             activePlayer.id
           );
           return;
         }
+      }
+
+      if (releasedFromJail && !isDoubles) {
+        setEngineState((prev) => ({
+          ...prev,
+          players: prev.players.map((p) =>
+            p.id === activePlayer.id
+              ? {
+                  ...p,
+                  cash: newCash,
+                  inJail: false,
+                  jailTurns: 0,
+                  hasGetOutOfJailFreeCard: usedJailCard ? false : p.hasGetOutOfJailFreeCard,
+                  activeModifiers: remainingModifiers,
+                }
+              : p
+          ),
+          gameState: {
+            ...prev.gameState,
+            lastDiceRoll: [d1, d2],
+            turnPhase: 'POST_ROLL',
+          },
+        }));
+        addLog(`🔓 ${activePlayer.name} was released from Jail but did not roll doubles. Turn ends.`, 'info', activePlayer.id);
+        return;
+      }
+
+      if (releasedFromJail && isDoubles) {
+        addLog(
+          `🔓 ${activePlayer.name} broke out of Jail with doubles and advances ${totalRoll} spaces!`,
+          'success',
+          activePlayer.id
+        );
       }
 
       if (isSnakeEyes && rules.snakeEyesBonus) {
@@ -335,7 +579,7 @@ export function useTurnPipeline<T extends EngineStateLike>({
       let newLaps = activePlayer.lapsCompleted;
       let newBankerLaps = gameState.bankerLapCounter;
 
-      let remainingModifiers = activePlayer.activeModifiers.filter(
+      remainingModifiers = activePlayer.activeModifiers.filter(
         (m) => m.id !== 'extra_die' && m.id !== 'one_die'
       );
 
@@ -343,11 +587,12 @@ export function useTurnPipeline<T extends EngineStateLike>({
         newLaps++;
         soundFx.playCash();
         newCash += 200;
-        if (activePlayer.id === 0) newBankerLaps++;
+        const bankerId = players.find((p) => !p.isBankrupt)?.id ?? 0;
+        if (activePlayer.id === bankerId) newBankerLaps++;
         remainingModifiers = remainingModifiers.filter((m) => m.expiresAt !== 'PASS_GO');
         addLog(`🏃 ${activePlayer.name} passed GO and collected $200!`, 'success', activePlayer.id);
 
-        if (activePlayer.id === 0 && rules.taxDayPortfolioTax && newBankerLaps % 5 === 0 && newBankerLaps > 0) {
+        if (activePlayer.id === bankerId && rules.taxDayPortfolioTax && newBankerLaps % 5 === 0 && newBankerLaps > 0) {
           soundFx.playCash();
           let totalCollectedTax = 0;
           setEngineState((prev) => {
@@ -370,9 +615,9 @@ export function useTurnPipeline<T extends EngineStateLike>({
             };
           });
           addLog(
-            `🏛️ TAX DAY! Banker completed lap #${newBankerLaps}. Portfolio taxes assessed on all players and added to Vault.`,
+            `🏛️ TAX DAY! Banker (${activePlayer.name}) completed lap #${newBankerLaps}. Portfolio taxes assessed on all players and added to Vault.`,
             'rule',
-            0
+            activePlayer.id
           );
         }
       }
@@ -397,7 +642,7 @@ export function useTurnPipeline<T extends EngineStateLike>({
                 inJail: false,
                 jailTurns: 0,
                 consecutiveDoubles: newConsecutiveDoubles,
-                hasGetOutOfJailFreeCard: releasedFromJail && p.hasGetOutOfJailFreeCard ? false : p.hasGetOutOfJailFreeCard,
+                hasGetOutOfJailFreeCard: usedJailCard ? false : p.hasGetOutOfJailFreeCard,
                 activeModifiers: remainingModifiers,
                 taxExempt: passedGo ? false : p.taxExempt,
               }
@@ -551,6 +796,8 @@ export function useTurnPipeline<T extends EngineStateLike>({
             const hasRentEvasion = activePlayer.activeModifiers.some((m) => m.id === 'rent_evasion');
             const isVip = activePlayer.activeModifiers.some((m) => m.id === 'vip');
 
+            const wasCrooked = prop.isCrooked || prop.modifiedBy?.includes('crooked');
+
             if (hasImmunity) {
               soundFx.playCash();
               addLog(`⚖️ Total Immunity Shield! ${activePlayer.name} paid $0 rent to ${owner?.name} for ${prop.name}!`, 'success', activePlayer.id);
@@ -569,6 +816,9 @@ export function useTurnPipeline<T extends EngineStateLike>({
                   }
                   return p;
                 }),
+                properties: wasCrooked
+                  ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                  : prev.properties,
               }));
               addLog(`🛡️ Free Rent Shield activated! ${activePlayer.name} paid $0; Bank covered $${rent} rent to ${owner?.name}!`, 'success', activePlayer.id);
             } else if (hasRentEvasion) {
@@ -587,6 +837,9 @@ export function useTurnPipeline<T extends EngineStateLike>({
                   if (p.id === prop.ownerId) return { ...p, cash: Math.max(0, p.cash - rent) };
                   return p;
                 }),
+                properties: wasCrooked
+                  ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                  : prev.properties,
               }));
               addLog(`🔄 Rent Evasion! Owner ${owner?.name} paid YOU $${rent} rent instead for ${prop.name}!`, 'success', activePlayer.id);
             } else if (activeConcessionIdx !== -1) {

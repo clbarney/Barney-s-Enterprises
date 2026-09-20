@@ -169,17 +169,18 @@ export function drawCommunityChestCard(deck: { drawPile: CommunityChestCard[]; d
   newDeck: { drawPile: CommunityChestCard[]; discardPile: CommunityChestCard[] };
 } {
   let { drawPile, discardPile } = deck;
-  if (drawPile.length === 0) {
-    drawPile = [...ALL_COMMUNITY_CHEST_CARDS].sort(() => Math.random() - 0.5);
+  if (!drawPile || drawPile.length === 0) {
+    const cardsToShuffle = discardPile && discardPile.length > 0 ? discardPile : ALL_COMMUNITY_CHEST_CARDS;
+    drawPile = [...cardsToShuffle].sort(() => Math.random() - 0.5);
     discardPile = [];
   }
-  const card = drawPile[0];
+  const card = drawPile[0] || ALL_COMMUNITY_CHEST_CARDS[0];
   const newDraw = drawPile.slice(1);
   return {
     card,
     newDeck: {
       drawPile: newDraw,
-      discardPile: [...discardPile, card],
+      discardPile: [...(discardPile || []), card],
     },
   };
 }

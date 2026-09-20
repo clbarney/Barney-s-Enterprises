@@ -162,17 +162,18 @@ export function drawChanceCard(deck: { drawPile: ChanceCard[]; discardPile: Chan
   newDeck: { drawPile: ChanceCard[]; discardPile: ChanceCard[] };
 } {
   let { drawPile, discardPile } = deck;
-  if (drawPile.length === 0) {
-    drawPile = [...ALL_CHANCE_CARDS].sort(() => Math.random() - 0.5);
+  if (!drawPile || drawPile.length === 0) {
+    const cardsToShuffle = discardPile && discardPile.length > 0 ? discardPile : ALL_CHANCE_CARDS;
+    drawPile = [...cardsToShuffle].sort(() => Math.random() - 0.5);
     discardPile = [];
   }
-  const card = drawPile[0];
+  const card = drawPile[0] || ALL_CHANCE_CARDS[0];
   const newDraw = drawPile.slice(1);
   return {
     card,
     newDeck: {
       drawPile: newDraw,
-      discardPile: [...discardPile, card],
+      discardPile: [...(discardPile || []), card],
     },
   };
 }

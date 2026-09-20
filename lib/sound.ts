@@ -11,16 +11,26 @@ class SoundEffects {
     if (!this.ctx && typeof window !== 'undefined') {
       const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       if (AudioCtx) {
-        this.ctx = new AudioCtx();
+        try {
+          this.ctx = new AudioCtx();
+        } catch {
+          // Ignore context creation errors before user interaction
+        }
       }
     }
     if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      this.ctx.resume().catch(() => {
+        // Safe catch for autoplay restrictions prior to initial user interaction
+      });
     }
     if (this.ctx && !this.masterGain) {
-      this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
-      this.masterGain.connect(this.ctx.destination);
+      try {
+        this.masterGain = this.ctx.createGain();
+        this.masterGain.gain.setValueAtTime(this.isMuted ? 0 : this.volume, this.ctx.currentTime);
+        this.masterGain.connect(this.ctx.destination);
+      } catch {
+        // Ignore audio graph wiring errors if suspended/not ready
+      }
     }
   }
 
@@ -252,7 +262,8 @@ class SoundEffects {
       clickGain.gain.setValueAtTime(volume * 0.65, now);
       clickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.025);
       clickOsc.connect(clickGain);
-      clickGain.connect(this.ctx.destination);
+      const dest = this.getDestination();
+      if (dest) clickGain.connect(dest);
       clickOsc.start(now);
       clickOsc.stop(now + 0.03);
     }
@@ -359,7 +370,8 @@ class SoundEffects {
     yoinkGain.gain.setValueAtTime(0.28, now);
     yoinkGain.gain.exponentialRampToValueAtTime(0.001, now + 0.40);
     yoinkOsc.connect(yoinkGain);
-    yoinkGain.connect(this.ctx.destination);
+    const dest = this.getDestination();
+    if (dest) yoinkGain.connect(dest);
     yoinkOsc.start(now);
     yoinkOsc.stop(now + 0.40);
 
@@ -373,7 +385,7 @@ class SoundEffects {
     slamGain.gain.setValueAtTime(0.35, slamTime);
     slamGain.gain.exponentialRampToValueAtTime(0.001, slamTime + 0.35);
     slamOsc.connect(slamGain);
-    slamGain.connect(this.ctx.destination);
+    if (dest) slamGain.connect(dest);
     slamOsc.start(slamTime);
     slamOsc.stop(slamTime + 0.35);
   }
@@ -382,6 +394,8 @@ class SoundEffects {
     this.init();
     if (!this.ctx || this.isMuted) return;
     const now = this.ctx.currentTime;
+    const dest = this.getDestination();
+    if (!dest) return;
 
     // Cheering chord harmonies + whistles
     const cheerFreqs = [523.25, 659.25, 783.99, 1046.50, 1318.51];
@@ -395,7 +409,7 @@ class SoundEffects {
       gain.gain.setValueAtTime(0.12, now + idx * 0.04);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
       osc.connect(gain);
-      gain.connect(this.getDestination());
+      gain.connect(dest);
       osc.start(now + idx * 0.04);
       osc.stop(now + 0.85);
     });
@@ -410,7 +424,7 @@ class SoundEffects {
     whistleGain.gain.setValueAtTime(0.15, now + 0.08);
     whistleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.50);
     whistleOsc.connect(whistleGain);
-    whistleGain.connect(this.ctx.destination);
+    whistleGain.connect(dest);
     whistleOsc.start(now + 0.08);
     whistleOsc.stop(now + 0.50);
   }

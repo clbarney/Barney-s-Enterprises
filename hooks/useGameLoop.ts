@@ -33,6 +33,9 @@ interface UseGameLoopProps<T extends EngineStateLike> {
   rules: GameRulesOptions;
   activeChanceCard: ChanceCard | null;
   activeCommunityChestCard: CommunityChestCard | null;
+  freeParkingModalOpen?: boolean;
+  railwayTransitModalOpen?: boolean;
+  landOnGoModalOpen?: boolean;
   addLog: (message: string, type?: GameEventLog['type'], playerId?: number) => void;
   handleBuyProperty: (propertyId: string, withDiscount?: boolean) => void;
   handleRollDice: () => void;
@@ -46,6 +49,9 @@ export function useGameLoop<T extends EngineStateLike>({
   rules,
   activeChanceCard,
   activeCommunityChestCard,
+  freeParkingModalOpen = false,
+  railwayTransitModalOpen = false,
+  landOnGoModalOpen = false,
   addLog,
   handleBuyProperty,
   handleRollDice,
@@ -460,7 +466,10 @@ export function useGameLoop<T extends EngineStateLike>({
       gameState.turnPhase === 'RESOLVING_SPACE' &&
       !isBoardAnimating &&
       !activeChanceCard &&
-      !activeCommunityChestCard
+      !activeCommunityChestCard &&
+      !freeParkingModalOpen &&
+      !railwayTransitModalOpen &&
+      !landOnGoModalOpen
     ) {
       const currentSpace = boardSpaces[activePlayer.position];
       const isUnownedProperty =
@@ -491,24 +500,48 @@ export function useGameLoop<T extends EngineStateLike>({
 
       if (isDoubles && !isInJail && consecutiveDoubles > 0 && consecutiveDoubles < 3) {
         const timer = setTimeout(() => {
-          setEngineState((prev) => ({
-            ...prev,
-            gameState: {
-              ...prev.gameState,
-              turnPhase: 'PRE_ROLL',
-            },
-          }));
+          setEngineState((prev) => {
+            // Guard against advancing if modal opened or human player is on an unowned property
+            const p = prev.players.find((pl) => pl.id === prev.gameState.activeTurnPlayerId) || prev.players[0];
+            const space = prev.boardSpaces ? prev.boardSpaces[p.position] : boardSpaces[p.position];
+            const isUnowned =
+              space?.type === 'PROPERTY' &&
+              space.propertyId &&
+              prev.properties.find((pr) => pr.id === space.propertyId)?.ownerId === null;
+            if (isUnowned && !p.isAi) {
+              return prev;
+            }
+            return {
+              ...prev,
+              gameState: {
+                ...prev.gameState,
+                turnPhase: 'PRE_ROLL',
+              },
+            };
+          });
         }, 500);
         return () => clearTimeout(timer);
       } else {
         const timer = setTimeout(() => {
-          setEngineState((prev) => ({
-            ...prev,
-            gameState: {
-              ...prev.gameState,
-              turnPhase: 'POST_ROLL',
-            },
-          }));
+          setEngineState((prev) => {
+            // Guard against advancing if modal opened or human player is on an unowned property
+            const p = prev.players.find((pl) => pl.id === prev.gameState.activeTurnPlayerId) || prev.players[0];
+            const space = prev.boardSpaces ? prev.boardSpaces[p.position] : boardSpaces[p.position];
+            const isUnowned =
+              space?.type === 'PROPERTY' &&
+              space.propertyId &&
+              prev.properties.find((pr) => pr.id === space.propertyId)?.ownerId === null;
+            if (isUnowned && !p.isAi) {
+              return prev;
+            }
+            return {
+              ...prev,
+              gameState: {
+                ...prev.gameState,
+                turnPhase: 'POST_ROLL',
+              },
+            };
+          });
         }, 400);
         return () => clearTimeout(timer);
       }
@@ -521,6 +554,9 @@ export function useGameLoop<T extends EngineStateLike>({
     isBoardAnimating,
     activeChanceCard,
     activeCommunityChestCard,
+    freeParkingModalOpen,
+    railwayTransitModalOpen,
+    landOnGoModalOpen,
     boardSpaces,
     properties,
     activePlayer.position,
@@ -536,7 +572,7 @@ export function useGameLoop<T extends EngineStateLike>({
   // --- AI BOT AUTOMATED TURNS & DEBT CRISIS ---
   useEffect(() => {
     if (gameState.gamePhase === 'IN_GAME' && activePlayer.isAi && !activePlayer.isBankrupt) {
-      if (activePlayer.cash <= 0) {
+      if (activePlayer.cash < 0) {
         const timer = setTimeout(() => {
           const unmortgaged = properties.filter((p) => p.ownerId === activePlayer.id && !p.isMortgaged);
           if (unmortgaged.length > 0) {

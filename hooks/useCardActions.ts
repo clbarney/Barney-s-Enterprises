@@ -107,6 +107,7 @@ export function useCardActions<T extends EngineStateLike>({
           if (prop && prop.ownerId !== null && prop.ownerId !== player.id) {
             const owner = players.find((p) => p.id === prop.ownerId);
             const rent = calculateRent(prop, properties, owner || null, 7);
+            const wasCrooked = prop.isCrooked || prop.modifiedBy?.includes('crooked');
             if (rent > 0) {
               soundFx.playCash();
               setEngineState((prev) => ({
@@ -116,14 +117,20 @@ export function useCardActions<T extends EngineStateLike>({
                   if (p.id === prop.ownerId) return { ...p, cash: p.cash + rent };
                   return p;
                 }),
+                properties: wasCrooked
+                  ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                  : prev.properties,
               }));
-              addLog(`🏠 ${player.name} paid $${rent} rent to ${owner?.name} for ${prop.name}.`, 'warning', player.id);
+              addLog(`🏠 ${player.name} paid $${rent} rent to ${owner?.name} for ${prop.name}${wasCrooked ? ' (2x Crooked!)' : ''}.`, 'warning', player.id);
             } else {
               setEngineState((prev) => ({
                 ...prev,
                 players: prev.players.map((p) =>
                   p.id === player.id ? { ...p, cash: newCash, position: targetIdx } : p
                 ),
+                properties: wasCrooked
+                  ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                  : prev.properties,
               }));
             }
           } else if (prop && prop.ownerId === null && player.isAi && newCash >= prop.basePrice) {
@@ -166,7 +173,11 @@ export function useCardActions<T extends EngineStateLike>({
           if (prop && prop.ownerId !== null && prop.ownerId !== player.id) {
             const owner = players.find((p) => p.id === prop.ownerId);
             const virtualRoll = Math.floor(Math.random() * 6) + 1 + (Math.floor(Math.random() * 6) + 1);
-            const rent = virtualRoll * 10;
+            let rent = virtualRoll * 10;
+            const wasCrooked = prop.isCrooked || prop.modifiedBy?.includes('crooked');
+            if (wasCrooked) {
+              rent *= 2;
+            }
             soundFx.playCash();
             setEngineState((prev) => ({
               ...prev,
@@ -175,8 +186,11 @@ export function useCardActions<T extends EngineStateLike>({
                 if (p.id === prop.ownerId) return { ...p, cash: p.cash + rent };
                 return p;
               }),
+              properties: wasCrooked
+                ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                : prev.properties,
             }));
-            addLog(`⚡ ${player.name} advanced to ${prop.name}, rolled ${virtualRoll}, and paid $${rent} (10x dice) rent to ${owner?.name}.`, 'warning', player.id);
+            addLog(`⚡ ${player.name} advanced to ${prop.name}, rolled ${virtualRoll}, and paid $${rent} (${wasCrooked ? '20x dice crooked' : '10x dice'} rent) to ${owner?.name}.`, 'warning', player.id);
           } else if (prop && prop.ownerId === null && player.isAi && newCash >= prop.basePrice) {
             soundFx.playBuyProperty();
             setEngineState((prev) => ({
@@ -223,7 +237,11 @@ export function useCardActions<T extends EngineStateLike>({
             const owner = players.find((p) => p.id === prop.ownerId);
             const ownerRailroads = properties.filter((p) => p.colorGroup === 'Railroad' && p.ownerId === prop.ownerId).length;
             const standardRent = ownerRailroads === 1 ? 25 : ownerRailroads === 2 ? 50 : ownerRailroads === 3 ? 100 : 200;
-            const rent = standardRent * 2;
+            let rent = standardRent * 2;
+            const wasCrooked = prop.isCrooked || prop.modifiedBy?.includes('crooked');
+            if (wasCrooked) {
+              rent *= 2;
+            }
             soundFx.playCash();
             setEngineState((prev) => ({
               ...prev,
@@ -232,8 +250,11 @@ export function useCardActions<T extends EngineStateLike>({
                 if (p.id === prop.ownerId) return { ...p, cash: p.cash + rent };
                 return p;
               }),
+              properties: wasCrooked
+                ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                : prev.properties,
             }));
-            addLog(`🚂 ${player.name} advanced to ${prop.name} and paid 2x rent ($${rent}) to ${owner?.name}.`, 'warning', player.id);
+            addLog(`🚂 ${player.name} advanced to ${prop.name} and paid 2x rent ($${rent}${wasCrooked ? ' - Doubled again for Crooked!' : ''}) to ${owner?.name}.`, 'warning', player.id);
           } else if (prop && prop.ownerId === null && player.isAi && newCash >= prop.basePrice) {
             soundFx.playBuyProperty();
             setEngineState((prev) => ({
@@ -290,6 +311,7 @@ export function useCardActions<T extends EngineStateLike>({
             if (prop && prop.ownerId !== null && prop.ownerId !== player.id) {
               const owner = players.find((p) => p.id === prop.ownerId);
               const rent = calculateRent(prop, properties, owner || null, 7);
+              const wasCrooked = prop.isCrooked || prop.modifiedBy?.includes('crooked');
               if (rent > 0) {
                 soundFx.playCash();
                 setEngineState((prev) => ({
@@ -299,8 +321,11 @@ export function useCardActions<T extends EngineStateLike>({
                     if (p.id === prop.ownerId) return { ...p, cash: p.cash + rent };
                     return p;
                   }),
+                  properties: wasCrooked
+                    ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                    : prev.properties,
                 }));
-                addLog(`🏠 ${player.name} paid $${rent} rent to ${owner?.name} for ${prop.name}.`, 'warning', player.id);
+                addLog(`🏠 ${player.name} paid $${rent} rent to ${owner?.name} for ${prop.name}${wasCrooked ? ' (2x Crooked!)' : ''}.`, 'warning', player.id);
                 break;
               }
             } else if (prop && prop.ownerId === null && player.isAi && player.cash >= prop.basePrice) {
@@ -543,16 +568,39 @@ export function useCardActions<T extends EngineStateLike>({
   );
 
   // --- MONOPOLY CHALLENGE DUEL ---
-  const handleInitiateChallenge = useCallback(() => {
+  const handleInitiateChallenge = useCallback((targetPropertyId?: string) => {
     if (!gameState.hasTaxOccurred) {
       addLog(`🔒 Monopoly Duel card is locked until the first tax event occurs on the board!`, 'warning', activePlayer.id);
       return;
     }
 
-    const unownedProps = properties.filter((p) => p.ownerId !== null && p.ownerId !== activePlayer.id);
-    if (unownedProps.length === 0) return;
+    const rivalProps = properties.filter((p) => p.ownerId !== null && p.ownerId !== activePlayer.id);
+    if (rivalProps.length === 0) {
+      addLog(`⚠️ No rival properties available to challenge!`, 'warning', activePlayer.id);
+      return;
+    }
 
-    const prop = unownedProps[0];
+    if (!targetPropertyId) {
+      if (!activePlayer.isAi) {
+        setCardTargetingState({
+          cardId: 'act_challenge',
+          rawCardId: 'act_challenge',
+          cardName: 'Monopoly Challenge Duel',
+          description: 'Select an opponent property on the board to challenge for a 3x buyout duel:',
+          targetType: 'PROPERTY',
+          eligiblePropertyIds: rivalProps.map((p) => p.id),
+        });
+        return;
+      } else {
+        // AI chooses the highest base price property owned by a rival
+        const highestValProp = [...rivalProps].sort((a, b) => b.basePrice - a.basePrice)[0];
+        targetPropertyId = highestValProp.id;
+      }
+    }
+
+    setCardTargetingState(null);
+
+    const prop = rivalProps.find((p) => p.id === targetPropertyId) || rivalProps[0];
     const seller = players.find((p) => p.id === prop.ownerId);
     if (!seller) return;
 
@@ -579,7 +627,7 @@ export function useCardActions<T extends EngineStateLike>({
       }));
       addLog(`⚔️ DUEL FAILED! ${seller.name} (${sellerRoll}) defended against ${activePlayer.name} (${buyerRoll}).`, 'warning', activePlayer.id);
     }
-  }, [gameState.hasTaxOccurred, properties, activePlayer, players, addLog, setEngineState]);
+  }, [gameState.hasTaxOccurred, properties, activePlayer, players, addLog, setEngineState, setCardTargetingState]);
 
   // --- WILDCARD PLAY ---
   const handlePlayCard = useCallback(
@@ -588,6 +636,10 @@ export function useCardActions<T extends EngineStateLike>({
       options?: { targetPropertyId?: string; targetPlayerId?: number }
     ) => {
       soundFx.playCardDraw();
+      if (rawCardId === 'act_challenge' || rawCardId === 'challenge') {
+        handleInitiateChallenge(options?.targetPropertyId);
+        return;
+      }
       const cardId = normalizeWildcardId(rawCardId);
       const card = activePlayer.wildcardsHand.find(
         (c) => normalizeWildcardId(c.id) === cardId || c.id === rawCardId
@@ -603,7 +655,8 @@ export function useCardActions<T extends EngineStateLike>({
           newLaps++;
           soundFx.playCash();
           newCash += 200;
-          if (activePlayer.id === 0) newBankerLaps++;
+          const bankerId = players.find((p) => !p.isBankrupt)?.id ?? 0;
+          if (activePlayer.id === bankerId) newBankerLaps++;
           addLog(`🏃 ${activePlayer.name} passed GO and collected $200!`, 'success', activePlayer.id);
         }
 
@@ -686,6 +739,8 @@ export function useCardActions<T extends EngineStateLike>({
             const hasRentEvasion = activePlayer.activeModifiers.some((m) => m.id === 'rent_evasion');
             const isVip = activePlayer.activeModifiers.some((m) => m.id === 'vip');
 
+            const wasCrooked = prop.isCrooked || prop.modifiedBy?.includes('crooked');
+
             if (hasImmunity) {
               soundFx.playCash();
               addLog(`⚖️ Total Immunity Shield! ${activePlayer.name} paid $0 rent for ${prop.name}!`, 'success', activePlayer.id);
@@ -704,6 +759,9 @@ export function useCardActions<T extends EngineStateLike>({
                   }
                   return p;
                 }),
+                properties: wasCrooked
+                  ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                  : prev.properties,
               }));
               addLog(`🛡️ Free Rent Shield! Bank covered $${rent} rent to ${owner?.name}!`, 'success', activePlayer.id);
             } else if (hasRentEvasion) {
@@ -722,6 +780,9 @@ export function useCardActions<T extends EngineStateLike>({
                   if (p.id === prop.ownerId) return { ...p, cash: Math.max(0, p.cash - rent) };
                   return p;
                 }),
+                properties: wasCrooked
+                  ? prev.properties.map((pr) => (pr.id === prop.id ? { ...pr, isCrooked: false, modifiedBy: pr.modifiedBy?.filter((b) => b !== 'crooked') } : pr))
+                  : prev.properties,
               }));
               addLog(`🔄 Rent Evasion! Owner ${owner?.name} paid YOU $${rent} rent!`, 'success', activePlayer.id);
             } else {
@@ -1583,6 +1644,7 @@ export function useCardActions<T extends EngineStateLike>({
       setEngineState,
       onSecondChanceReroll,
       handleFreeParkingLanding,
+      handleInitiateChallenge,
     ]
   );
 

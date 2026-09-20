@@ -5801,10 +5801,9 @@ export const Board3D: React.FC<Board3DProps> = ({
       }
 
       // Multi-tier intelligent CPU/GPU throttling:
-      // Wait for framerate to change until NO ACTIVITY FOR 5 MINUTES (300,000 ms)
-      // 1. Background tab / minimized: 1 FPS only after 5 minutes of inactivity (conserves CPU/battery when abandoned)
-      // 2. Full 5-minute inactivity: 20 FPS smart idle
-      // 3. Active gameplay & idle turns (< 5 min): Full native target FPS!
+      // When tokens are not moving, dice are idle, and camera is not dragging:
+      // 1. Cap rendering at 25-30 FPS idle when motionless or 1-15 FPS in background/inactive
+      // 2. In active motion (dice rolling, token moving, dragging camera): Render at full target FPS!
       const userInactiveMs = now - lastUserInputTimeRef.current;
       const IDLE_INACTIVITY_THRESHOLD_MS = 300000; // 5 full minutes of inactivity
       const isInputInactive5Min = userInactiveMs >= IDLE_INACTIVITY_THRESHOLD_MS;
@@ -5816,7 +5815,10 @@ export const Board3D: React.FC<Board3DProps> = ({
       } else if (typeof document !== 'undefined' && document.hidden) {
         dynamicTargetFps = 15;
       } else if (isIdlePowerActive) {
-        dynamicTargetFps = 20;
+        dynamicTargetFps = 15;
+      } else if (!isMotionActive) {
+        // When no tokens are moving, dice are idle, and controls are not dragging, cap at 30 FPS
+        dynamicTargetFps = Math.min(targetFps, 30);
       }
 
       const effectiveInterval = 1000 / dynamicTargetFps;
@@ -5826,8 +5828,8 @@ export const Board3D: React.FC<Board3DProps> = ({
       }
 
       // ON-DEMAND DIRTY-FLAG RENDER LOOP:
-      // Only skip WebGL rendering if motionless AND inactive for 5 full minutes
-      if (!isDirtyRef.current && dirtyFramesRef.current <= 0 && !isMotionActive && isInputInactive5Min) {
+      // When completely motionless and settle frames have completed, skip WebGL frame rendering until dirtied
+      if (!isDirtyRef.current && dirtyFramesRef.current <= 0 && !isMotionActive) {
         return;
       }
 
@@ -7772,14 +7774,14 @@ export const Board3D: React.FC<Board3DProps> = ({
       }
 
       // Adaptive Battery Saver & Low-Power Constraints:
-      // In low-power/battery mode or when bloom is disabled:
-      // Bypass EffectComposer and UnrealBloomPass entirely to render straight via renderer.render(scene, camera)
+      // When bloom is disabled, or in battery saver mode, or when scene is idle/motionless:
+      // Bypass EffectComposer and UnrealBloomPass to render directly via renderer.render(scene, camera) to save GPU passes
       const isBatteryMode = Boolean(
         currentEff.isBatterySaver ||
         isBatterySaverActive ||
         settingsRef.current?.isBatterySaver
       );
-      if (currentEff.bloomEnabled && !isBatteryMode && composerRef.current) {
+      if (currentEff.bloomEnabled && !isBatteryMode && isMotionActive && composerRef.current) {
         composerRef.current.render();
       } else {
         renderer.render(scene, camera);

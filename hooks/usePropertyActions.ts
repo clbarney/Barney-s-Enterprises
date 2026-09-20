@@ -213,8 +213,24 @@ export function usePropertyActions<T extends EngineStateLike>({
         return;
       }
 
-      // Rule: Option for a hotel only when all properties in this color group have 4 houses on them
+      // Uniform building validation: Cannot place Nth house until all properties have N-1 houses
       const isHotelUpgrade = prop.houses === 4;
+      if (!isHotelUpgrade) {
+        const targetHouseCount = prop.houses; // player is trying to build house #(targetHouseCount + 1)
+        const hasUnevenBuilding = groupProps.some(
+          (p) => (p.hotel ? 5 : p.houses) < targetHouseCount
+        );
+        if (hasUnevenBuilding) {
+          addLog(
+            `⚠️ Cannot build house #${targetHouseCount + 1} on ${prop.name}! Monopoly rules require uniform building: all ${prop.colorGroup} properties must have at least ${targetHouseCount} house${targetHouseCount === 1 ? '' : 's'} before adding another here.`,
+            'warning',
+            activePlayer.id
+          );
+          return;
+        }
+      }
+
+      // Rule: Option for a hotel only when all properties in this color group have 4 houses on them
       if (isHotelUpgrade) {
         const allHave4Houses = groupProps.every((p) => p.houses >= 4 || p.hotel);
         if (!allHave4Houses) {
@@ -261,6 +277,21 @@ export function usePropertyActions<T extends EngineStateLike>({
         return;
       }
 
+      // Uniform breakdown validation: Player cannot sell from this property if other properties in the set have more houses/hotels
+      const groupProps = properties.filter((p) => p.colorGroup === prop.colorGroup);
+      const currentLevel = prop.hotel ? 5 : (prop.houses || 0);
+      const hasHigherInGroup = groupProps.some(
+        (p) => (p.hotel ? 5 : (p.houses || 0)) > currentLevel
+      );
+      if (hasHigherInGroup) {
+        addLog(
+          `⚠️ Cannot sell building on ${prop.name}! Monopoly rules require uniform breakdown: properties with more buildings in the ${prop.colorGroup} set must be sold down first.`,
+          'warning',
+          activePlayer.id
+        );
+        return;
+      }
+
       const refund = Math.round(prop.houseCost / 2);
       soundFx.playCash();
 
@@ -293,6 +324,26 @@ export function usePropertyActions<T extends EngineStateLike>({
     (propId: string) => {
       const prop = properties.find((p) => p.id === propId);
       if (!prop) return;
+
+      if (prop.ownerId !== activePlayer.id) {
+        addLog(`⚠️ You do not own ${prop.name}!`, 'warning', activePlayer.id);
+        return;
+      }
+
+      if (prop.isMortgaged) {
+        addLog(`⚠️ ${prop.name} is already mortgaged!`, 'warning', activePlayer.id);
+        return;
+      }
+
+      if (prop.colorGroup) {
+        const groupProps = properties.filter((p) => p.colorGroup === prop.colorGroup);
+        const hasDevelopments = groupProps.some((p) => (p.houses && p.houses > 0) || p.hotel);
+        if (hasDevelopments) {
+          addLog(`⚠️ Cannot mortgage ${prop.name}: all properties in the ${prop.colorGroup} group must have all houses and hotels sold first!`, 'warning', activePlayer.id);
+          return;
+        }
+      }
+
       soundFx.playCash();
       setEngineState((prev) => ({
         ...prev,
@@ -311,8 +362,23 @@ export function usePropertyActions<T extends EngineStateLike>({
     (propId: string) => {
       const prop = properties.find((p) => p.id === propId);
       if (!prop) return;
+
+      if (prop.ownerId !== activePlayer.id) {
+        addLog(`⚠️ You do not own ${prop.name}!`, 'warning', activePlayer.id);
+        return;
+      }
+
+      if (!prop.isMortgaged) {
+        addLog(`⚠️ ${prop.name} is not mortgaged!`, 'warning', activePlayer.id);
+        return;
+      }
+
       const cost = Math.round((prop.basePrice / 2) * 1.1);
-      if (activePlayer.cash < cost) return;
+      if (activePlayer.cash < cost) {
+        addLog(`⚠️ Insufficient funds to unmortgage ${prop.name} (requires $${cost}).`, 'warning', activePlayer.id);
+        return;
+      }
+
       soundFx.playCash();
       setEngineState((prev) => ({
         ...prev,
